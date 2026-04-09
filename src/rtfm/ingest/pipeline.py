@@ -420,18 +420,21 @@ async def _ingest_one_async(
             all_embeddings.extend(batch_embs)
             reporter.update(name, detail=f"{len(all_embeddings)}/{len(units)}")
 
-    # Stage 3: Store (serialized — single-writer)
+    # Stage 3: Store (serialized — single-writer, in thread so the event
+    # loop stays free for embedding dispatches)
     reporter.update(name, status="storing", detail=f"0/{len(units)}")
 
     def _store_progress(done: int, total: int) -> None:
         reporter.update(name, detail=f"{done}/{total}")
 
-    async with store_lock:
+    def _do_store() -> None:
         if rebuild:
             storage.clear_framework(name)
-
         storage.insert_units(units, embeddings=all_embeddings, on_progress=_store_progress)
         storage.set_version(name, version_key, doc_system=doc_system)
+
+    async with store_lock:
+        await asyncio.to_thread(_do_store)
 
     # Health check
     min_score = config.min_health_score
