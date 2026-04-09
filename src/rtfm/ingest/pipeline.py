@@ -1,12 +1,14 @@
 """Ingestion pipeline: orchestrates download, parsing, extraction, and storage."""
 
 
+import asyncio
+import multiprocessing
 import os
 import stat
 import sys
 import tempfile
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from rich.console import Console
@@ -227,6 +229,14 @@ def update_all(config: AppConfig, *, as_json: bool = False) -> None:
     storage.close()
 
 
+def _resolve_workers(config: AppConfig) -> int:
+    """Resolve the number of embedding worker processes."""
+    w = config.ingest_workers
+    if w <= 0:
+        return max(1, (os.cpu_count() or 2) // 2)
+    return w
+
+
 def _ingest_many(
     config: AppConfig,
     storage: Storage,
@@ -235,16 +245,28 @@ def _ingest_many(
     rebuild: bool = True,
     as_json: bool = False,
 ) -> None:
-    """Ingest a set of frameworks rendered through one reporter.
+    """Ingest a set of frameworks with async I/O and multiprocess embedding.
 
-    Phase A — download + parse all sources in parallel (independent CPU/IO).
-    Phase B — embed each prepared payload sequentially (Chroma is single-writer).
-
-    *rebuild* — when True, clear each framework's existing data before
-    re-inserting. Used by ``update`` and explicit ``ingest --rebuild``.
+    Each source runs independently through download → parse → embed → store.
+    Embedding runs in worker processes; storage writes are serialized.
     """
+    asyncio.run(_ingest_many_async(
+        config, storage, framework_names, rebuild=rebuild, as_json=as_json,
+    ))
+
+
+async def _ingest_many_async(
+    config: AppConfig,
+    storage: Storage,
+    framework_names: list[str],
+    *,
+    rebuild: bool,
+    as_json: bool,
+) -> None:
+    import signal
+
     sources = {name: config.sources[name] for name in framework_names}
-    prepared: dict[str, tuple[list[KnowledgeUnit], str, str]] = {}
+    store_lock = asyncio.Lock()
 
     reporter = make_reporter(
         console,
@@ -252,86 +274,174 @@ def _ingest_many(
         as_json=as_json,
     )
 
-    with reporter:
-        for name in sources:
-            reporter.add(name, name, status="pending")
+    n_workers = _resolve_workers(config)
+    embed_executor = ProcessPoolExecutor(
+        max_workers=n_workers,
+        mp_context=multiprocessing.get_context("spawn"),
+        initializer=_embed_worker_init,
+    )
 
-        # Phase A: download + parse in parallel
-        def _do_download(name: str) -> tuple[str, list[KnowledgeUnit] | None, str, str]:
-            src = sources[name]
+    # Ensure worker processes are cleaned up on interrupt
+    loop = asyncio.get_running_loop()
+    cancelled = False
 
-            def _on_progress(msg: str) -> None:
-                reporter.update(name, detail=msg)
+    def _shutdown_on_signal() -> None:
+        nonlocal cancelled
+        if cancelled:
+            return
+        cancelled = True
+        embed_executor.shutdown(wait=False, cancel_futures=True)
+        for task in asyncio.all_tasks(loop):
+            task.cancel()
 
-            reporter.update(name, status="downloading")
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, _shutdown_on_signal)
+
+    try:
+        with reporter:
+            for name in sources:
+                reporter.add(name, name, status="pending")
+
+            results: dict[str, int] = {}
             try:
-                units, version_key, doc_system = _download_and_parse(src, on_progress=_on_progress)
-            except Exception as e:  # noqa: BLE001
-                reporter.finish(name, status="error", detail=str(e)[:80])
-                return name, None, "", ""
-            # An empty download with an "unknown" version key means the
-            # source could not be reached (e.g. 429 rate limit on the
-            # initial crawl GET). Don't silently store 0 units — surface it.
-            # Use status="error" but leave detail untouched so the last
-            # crawler message ("rate limited", "network error", ...) stays
-            # visible to the user.
-            if not units and version_key in ("unknown", ""):
-                reporter.finish(name, status="error")
-                return name, None, "", ""
-            reporter.update(name, status="parsing", detail=f"{len(units)} units ready")
-            return name, units, version_key, doc_system
+                async with asyncio.TaskGroup() as tg:
+                    for name in sources:
+                        tg.create_task(_ingest_one_async(
+                            name=name,
+                            src=sources[name],
+                            config=config,
+                            storage=storage,
+                            reporter=reporter,
+                            embed_executor=embed_executor,
+                            store_lock=store_lock,
+                            rebuild=rebuild,
+                            results=results,
+                        ))
+            except* (KeyboardInterrupt, asyncio.CancelledError):
+                reporter.log("Interrupted — cleaning up workers...")
 
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            futures = {pool.submit(_do_download, name): name for name in sources}
-            for future in as_completed(futures):
-                name, units, version_key, doc_system = future.result()
-                if units is not None:
-                    prepared[name] = (units, version_key, doc_system)
+            total_units = sum(results.values())
+            if total_units:
+                reporter.log(f"Total: {total_units} units ingested across {len(results)} sources")
+    finally:
+        embed_executor.shutdown(wait=False, cancel_futures=True)
+        # Kill any remaining worker processes
+        for pid in _get_executor_pids(embed_executor):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.remove_signal_handler(sig)
 
-        # Phase B: embed sequentially (Chroma is single-writer, plus we get
-        # one clean progress stream per source).
-        total_units = 0
-        for name in sources:
-            if name not in prepared:
-                continue
-            units, version_key, doc_system = prepared[name]
-            if not units:
-                reporter.finish(name, status="done", detail="0 units")
-                continue
 
-            if rebuild:
-                # Clear stale entries with old IDs that the new payload no
-                # longer carries. insert_units itself is INSERT OR REPLACE
-                # by id, so this only matters when rebuild is requested.
+def _get_executor_pids(executor: ProcessPoolExecutor) -> list[int]:
+    """Extract PIDs from a ProcessPoolExecutor's internal process map."""
+    pids: list[int] = []
+    # Access internal _processes dict (set of Process objects)
+    processes = getattr(executor, "_processes", None)
+    if processes:
+        for p in processes.values():
+            if p.pid and p.is_alive():
+                pids.append(p.pid)
+    return pids
+
+
+def _embed_worker_init() -> None:
+    """ProcessPoolExecutor initializer — pre-load the ONNX model."""
+    from rtfm.ingest.embedder import worker_init
+    worker_init()
+
+
+async def _ingest_one_async(
+    *,
+    name: str,
+    src: SourceConfig,
+    config: AppConfig,
+    storage: Storage,
+    reporter: Reporter,
+    embed_executor: ProcessPoolExecutor,
+    store_lock: asyncio.Lock,
+    rebuild: bool,
+    results: dict[str, int],
+) -> None:
+    """Per-source pipeline: download → parse → embed → store."""
+    from rtfm.ingest.embedder import embed_batch
+
+    # Stage 1: Download + parse (in thread)
+    def _on_progress(msg: str) -> None:
+        reporter.update(name, detail=msg)
+
+    reporter.update(name, status="downloading")
+    try:
+        units, version_key, doc_system = await asyncio.to_thread(
+            _download_and_parse, src, _on_progress,
+        )
+    except Exception as e:  # noqa: BLE001
+        reporter.finish(name, status="error", detail=str(e)[:80])
+        return
+
+    if not units and version_key in ("unknown", ""):
+        reporter.finish(name, status="error")
+        return
+
+    if not units:
+        reporter.finish(name, status="done", detail="0 units")
+        return
+
+    reporter.update(name, status="parsing", detail=f"{len(units)} units ready")
+
+    # Stage 2: Embed in worker processes
+    reporter.update(name, status="embedding", detail=f"0/{len(units)}")
+
+    documents = [
+        " > ".join(u.heading_hierarchy) + "\n\n" + u.content
+        for u in units
+    ]
+
+    loop = asyncio.get_running_loop()
+    all_embeddings: list[list[float]] = []
+    batch_size = 100
+
+    for i in range(0, len(documents), batch_size):
+        batch_docs = documents[i : i + batch_size]
+        batch_embs = await loop.run_in_executor(
+            embed_executor, embed_batch, batch_docs,
+        )
+        all_embeddings.extend(batch_embs)
+        reporter.update(name, detail=f"{len(all_embeddings)}/{len(units)}")
+
+    # Stage 3: Store (serialized — single-writer)
+    reporter.update(name, status="storing", detail=f"0/{len(units)}")
+
+    def _store_progress(done: int, total: int) -> None:
+        reporter.update(name, detail=f"{done}/{total}")
+
+    async with store_lock:
+        if rebuild:
+            storage.clear_framework(name)
+
+        storage.insert_units(units, embeddings=all_embeddings, on_progress=_store_progress)
+        storage.set_version(name, version_key, doc_system=doc_system)
+
+    # Health check
+    min_score = config.min_health_score
+    if min_score > 0:
+        from rtfm.health import compute_health
+        h = compute_health(storage.conn, name)
+        if h.score < min_score:
+            async with store_lock:
                 storage.clear_framework(name)
+            reasons = ", ".join(h.signals[:3])
+            reporter.finish(
+                name,
+                status="rejected",
+                detail=f"health {h.score}/{min_score} ({reasons})",
+            )
+            return
 
-            reporter.update(name, status="embedding", detail=f"0/{len(units)}")
-
-            def _embed_progress(done: int, total: int, _name: str = name) -> None:
-                reporter.update(_name, detail=f"{done}/{total}")
-
-            storage.insert_units(units, on_progress=_embed_progress)
-            storage.set_version(name, version_key, doc_system=doc_system)
-
-            # Post-ingest health check
-            min_score = config.min_health_score
-            if min_score > 0:
-                from rtfm.health import compute_health
-                h = compute_health(storage.conn, name)
-                if h.score < min_score:
-                    storage.clear_framework(name)
-                    reasons = ", ".join(h.signals[:3])
-                    reporter.finish(
-                        name,
-                        status="rejected",
-                        detail=f"health {h.score}/{min_score} ({reasons})",
-                    )
-                    continue
-
-            reporter.finish(name, status="done", detail=f"{len(units)} units")
-            total_units += len(units)
-
-        reporter.log(f"Total: {total_units} units ingested across {len(prepared)} sources")
+    reporter.finish(name, status="done", detail=f"{len(units)} units")
+    results[name] = len(units)
 
 
 def ingest_all(

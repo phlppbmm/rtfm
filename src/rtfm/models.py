@@ -167,6 +167,7 @@ class AppConfig:
     host: str = "127.0.0.1"
     port: int = 8787
     min_health_score: int = 80
+    ingest_workers: int = 0  # 0 = auto (os.cpu_count() // 2)
     sources: dict[str, SourceConfig] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -185,6 +186,7 @@ class AppConfig:
             host=str(server.get("host", "127.0.0.1")),
             port=int(server.get("port", 8787)),
             min_health_score=int(d.get("min_health_score", 80)),
+            ingest_workers=int(d.get("ingest_workers", 0)),
             sources=sources,
         )
 

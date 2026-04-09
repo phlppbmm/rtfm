@@ -44,6 +44,7 @@ _STATUS_STYLE: dict[str, tuple[str, str]] = {
     "fetching": ("yellow", "⠼"),
     "parsing": ("blue", "⠼"),
     "embedding": ("cyan", "⠼"),
+    "storing": ("cyan", "⠼"),
     "ok": ("green", "✓"),
     "done": ("green", "✓"),
     "outdated": ("yellow", "⚠"),

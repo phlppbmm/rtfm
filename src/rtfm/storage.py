@@ -504,9 +504,14 @@ class Storage:
     def insert_units(
         self,
         units: list[KnowledgeUnit],
+        embeddings: list[list[float]] | None = None,
         on_progress: "Callable[[int, int], None] | None" = None,
     ) -> None:
-        """Insert or replace units into both SQLite and ChromaDB."""
+        """Insert or replace units into both SQLite and ChromaDB.
+
+        When *embeddings* is provided, ChromaDB skips internal embedding
+        and stores the pre-computed vectors directly.
+        """
         if not units:
             return
 
@@ -520,7 +525,7 @@ class Storage:
             )
         self._conn.commit()
 
-        self._chroma_upsert(units, on_progress=on_progress)
+        self._chroma_upsert(units, embeddings=embeddings, on_progress=on_progress)
 
     def clear_framework(self, framework: str) -> None:
         """Remove all data for a framework."""
@@ -660,6 +665,7 @@ class Storage:
     def _chroma_upsert(
         self,
         units: list[KnowledgeUnit],
+        embeddings: list[list[float]] | None = None,
         on_progress: "Callable[[int, int], None] | None" = None,
     ) -> None:
         ids = [u.id for u in units]
@@ -680,10 +686,14 @@ class Storage:
         total = len(ids)
         with _route_native_stderr():
             for i in range(0, total, batch_size):
+                batch_embs = (
+                    embeddings[i : i + batch_size] if embeddings else None
+                )
                 self._collection.upsert(
                     ids=ids[i : i + batch_size],
                     documents=documents[i : i + batch_size],
                     metadatas=metadatas[i : i + batch_size],
+                    embeddings=batch_embs,
                 )
                 done = min(i + batch_size, total)
                 if on_progress is not None:
