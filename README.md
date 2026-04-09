@@ -11,11 +11,17 @@ LLMs hallucinate APIs. They confidently generate outdated patterns, mix up v1/v2
 ## Install
 
 ```bash
-# Requires Python 3.11+ and uv
-uv tool install -e .
+# Requires Python 3.11+
+uv tool install agent-rtfm
 
-# Or for development
-git clone <repo-url> && cd rtfm
+# Or with pipx
+pipx install agent-rtfm
+```
+
+For development:
+
+```bash
+git clone https://github.com/phlppbmm/rtfm && cd rtfm
 uv sync
 ```
 
