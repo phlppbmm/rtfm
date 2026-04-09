@@ -82,6 +82,15 @@ jobs:
   update-aur:
     needs: publish-pypi
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        package:
+          - name: python-agent-rtfm
+            files: "PKGBUILD .SRCINFO"
+          - name: python-agent-rtfm-bin
+            files: "PKGBUILD .SRCINFO"
+          - name: python-agent-rtfm-git
+            files: "PKGBUILD .SRCINFO"
     steps:
       - name: Set up SSH
         env:
@@ -95,8 +104,8 @@ jobs:
           echo "  User aur" >> ~/.ssh/config
           ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
       - name: Clone AUR repo
-        run: git clone ssh://aur@aur.archlinux.org/python-agent-rtfm.git aur
-      - name: Update PKGBUILD
+        run: git clone ssh://aur@aur.archlinux.org/${{ matrix.package.name }}.git aur
+      - name: Update version
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           cd aur
@@ -104,7 +113,7 @@ jobs:
           sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
           sed -i "s/pkgver = .*/pkgver = ${VERSION}/" .SRCINFO
           sed -i "s/pkgrel = .*/pkgrel = 1/" .SRCINFO
-          sed -i "s|agent_rtfm-.*\.tar\.gz|agent_rtfm-${VERSION}.tar.gz|g" .SRCINFO
+          sed -i "s|agent_rtfm-[0-9.]*|agent_rtfm-${VERSION}|g" PKGBUILD .SRCINFO
       - name: Push to AUR
         run: |
           cd aur
