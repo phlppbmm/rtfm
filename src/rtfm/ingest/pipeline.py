@@ -280,6 +280,7 @@ async def _ingest_many_async(
         mp_context=multiprocessing.get_context("spawn"),
         initializer=_embed_worker_init,
     )
+    embed_semaphore = asyncio.Semaphore(n_workers)
 
     # Ensure worker processes are cleaned up on interrupt.
     # asyncio.to_thread() threads are not interruptible, so we kill
@@ -319,6 +320,7 @@ async def _ingest_many_async(
                             storage=storage,
                             reporter=reporter,
                             embed_executor=embed_executor,
+                            embed_semaphore=embed_semaphore,
                             store_lock=store_lock,
                             rebuild=rebuild,
                             results=results,
@@ -366,6 +368,7 @@ async def _ingest_one_async(
     storage: Storage,
     reporter: Reporter,
     embed_executor: ProcessPoolExecutor,
+    embed_semaphore: asyncio.Semaphore,
     store_lock: asyncio.Lock,
     rebuild: bool,
     results: dict[str, int],
@@ -373,7 +376,7 @@ async def _ingest_one_async(
     """Per-source pipeline: download → parse → embed → store."""
     from rtfm.ingest.embedder import embed_batch
 
-    # Stage 1: Download + parse (in thread)
+    # Stage 1: Download + parse (in thread, no concurrency limit)
     def _on_progress(msg: str) -> None:
         reporter.update(name, detail=msg)
 
@@ -396,25 +399,26 @@ async def _ingest_one_async(
 
     reporter.update(name, status="parsing", detail=f"{len(units)} units ready")
 
-    # Stage 2: Embed in worker processes
-    reporter.update(name, status="embedding", detail=f"0/{len(units)}")
+    # Stage 2: Embed in worker processes (semaphore limits concurrent sources)
+    async with embed_semaphore:
+        reporter.update(name, status="embedding", detail=f"0/{len(units)}")
 
-    documents = [
-        " > ".join(u.heading_hierarchy) + "\n\n" + u.content
-        for u in units
-    ]
+        documents = [
+            " > ".join(u.heading_hierarchy) + "\n\n" + u.content
+            for u in units
+        ]
 
-    loop = asyncio.get_running_loop()
-    all_embeddings: list[list[float]] = []
-    batch_size = 100
+        loop = asyncio.get_running_loop()
+        all_embeddings: list[list[float]] = []
+        batch_size = 100
 
-    for i in range(0, len(documents), batch_size):
-        batch_docs = documents[i : i + batch_size]
-        batch_embs = await loop.run_in_executor(
-            embed_executor, embed_batch, batch_docs,
-        )
-        all_embeddings.extend(batch_embs)
-        reporter.update(name, detail=f"{len(all_embeddings)}/{len(units)}")
+        for i in range(0, len(documents), batch_size):
+            batch_docs = documents[i : i + batch_size]
+            batch_embs = await loop.run_in_executor(
+                embed_executor, embed_batch, batch_docs,
+            )
+            all_embeddings.extend(batch_embs)
+            reporter.update(name, detail=f"{len(all_embeddings)}/{len(units)}")
 
     # Stage 3: Store (serialized — single-writer)
     reporter.update(name, status="storing", detail=f"0/{len(units)}")
