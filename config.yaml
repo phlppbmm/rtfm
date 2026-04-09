@@ -1,0 +1,36 @@
+# Framework documentation sources
+# Embedding model for ChromaDB semantic search
+embedding_model: nomic-ai/nomic-embed-text-v1.5
+
+# Data directory (omit to use ~/.rtfm/data)
+# data_dir: /custom/path
+
+# Server settings
+server:
+  host: 127.0.0.1
+  port: 8787
+
+sources:
+  svelte:
+    type: llms_txt
+    url: https://svelte.dev/llms-full.txt
+    language: javascript
+
+  fastapi:
+    type: github
+    repo: fastapi/fastapi
+    docs_path: docs/en/docs
+    glob: "**/*.md"
+    language: python
+
+  jira_js:
+    type: website
+    url: https://mrrefactoring.github.io/jira.js/*
+    language: javascript
+
+  # Example: local source
+  # rust_std:
+  #   type: local
+  #   path: /path/to/rust/library
+  #   glob: "**/*.md"
+  #   language: rust

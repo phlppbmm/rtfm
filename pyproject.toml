@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rtfm"
+version = "0.1.0"
+description = "Local documentation retrieval service for agent-assisted development"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "chromadb>=0.5",
+    "gitpython>=3.1",
+    "httpx>=0.27",
+    "click>=8.1",
+    "rich>=13.0",
+    "pyyaml>=6.0",
+    "html2text>=2025.4.15",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "markdownify>=0.14",
+]
+
+[project.scripts]
+rtfm = "rtfm.cli:cli"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rtfm"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.20.0",
+    "pyright>=1.1.408",
+    "pytest>=9.0.2",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.9",
+    "ty>=0.0.28",
+    "types-pyyaml>=6.0.12.20250915",
+]
+
+[tool.pyright]
+typeCheckingMode = "strict"
+pythonVersion = "3.11"
+include = ["src/rtfm"]
+reportMissingTypeStubs = false
+reportUnknownMemberType = "warning"
+reportUnknownVariableType = "warning"
+reportUnknownArgumentType = "warning"
+reportUnknownParameterType = "warning"
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+files = ["src/rtfm"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "TCH"]
