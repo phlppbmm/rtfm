@@ -145,17 +145,29 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           cd aur
-          # Only update pkgver and pkgrel — PKGBUILDs use ${pkgver} in
-          # source URLs and paths, so no other replacements needed.
           sed -i "s/^pkgver=.*/pkgver=${VERSION}/" PKGBUILD
           sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
-          # Regenerate .SRCINFO (expands ${pkgver} in source URLs)
+
+          # For -bin package: resolve the hash-based PyPI wheel URL
+          if grep -q 'files.pythonhosted.org/packages/' PKGBUILD; then
+            WHEEL_URL=$(curl -sL "https://pypi.org/simple/agent-rtfm/" \
+              | grep -o "https://[^\"#]*agent_rtfm-${VERSION}-py3-none-any\\.whl" | head -1)
+            if [ -n "$WHEEL_URL" ]; then
+              # Replace the full source URL (everything after ::)
+              sed -i "s|https://files.pythonhosted.org/packages/[^\"]*|${WHEEL_URL}|" PKGBUILD
+            else
+              echo "ERROR: wheel URL not found on PyPI for ${VERSION}" >&2
+              exit 1
+            fi
+          fi
+
+          # Regenerate .SRCINFO
           if command -v makepkg &>/dev/null; then
             makepkg --printsrcinfo > .SRCINFO
           else
-            sed -i "s/^\\tpkgver = .*/\\tpkgver = ${VERSION}/" .SRCINFO
-            sed -i "s/^\\tpkgrel = .*/\\tpkgrel = 1/" .SRCINFO
-            # Expand ${pkgver} in source/noextract lines
+            sed -i "s/^\tpkgver = .*/\tpkgver = ${VERSION}/" .SRCINFO
+            sed -i "s/^\tpkgrel = .*/\tpkgrel = 1/" .SRCINFO
+            sed -i "s|https://files.pythonhosted.org/packages/[^\t]*|${WHEEL_URL:-}|" .SRCINFO
             sed -i "s/agent_rtfm-[0-9][0-9.]*[0-9]/agent_rtfm-${VERSION}/g" .SRCINFO
           fi
       - name: Push to AUR
