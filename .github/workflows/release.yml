@@ -19,14 +19,14 @@ jobs:
   publish-pypi:
     needs: test
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - run: uv build
-      - name: Publish to PyPI
-        env:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
-        run: uv publish
+      - name: Publish to PyPI (Trusted Publisher)
+        run: uv publish --trusted-publishing always
 
   build-executables:
     needs: test
