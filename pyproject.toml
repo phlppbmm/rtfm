@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-rtfm"
-version = "0.2.2"
+version = "0.2.3"
 description = "Local documentation retrieval service for agent-assisted development. Indexes framework docs into typed Knowledge Units and exposes them via CLI and HTTP API."
 readme = "README.md"
 license = "MIT"
