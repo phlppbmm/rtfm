@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.3] - 2026-04-09
+
+### Added
+
+- async ingest pipeline with multiprocess embedding
+
+### Documentation
+
+- update CHANGELOG.md for v0.2.2
+
+### Fixed
+
+- skip per-framework clear when clear_all already ran on rebuild
+- run storage writes in thread to avoid blocking event loop
+- limit concurrent embedding sources via semaphore
+- single Ctrl+C exits immediately without hanging
+- suppress worker traceback spam on Ctrl+C
+- use absolute SSH paths and accept-new for Arch container
+
+### Miscellaneous
+
+- bump version to 0.2.3
 ## [0.2.2] - 2026-04-09
 
 ### Documentation
