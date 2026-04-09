@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.2] - 2026-04-09
+
+### Documentation
+
+- update CHANGELOG.md for v0.2.1
+
+### Fixed
+
+- VACUUM after remove, add hidden nuke command
+- run AUR updates in Arch container with namcap validation
+- resolve hash-based PyPI wheel URL for -bin package
+
+### Miscellaneous
+
+- bump version to 0.2.2
 ## [0.2.1] - 2026-04-09
 
 ### Documentation
