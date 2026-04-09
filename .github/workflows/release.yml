@@ -167,7 +167,7 @@ jobs:
               sleep 15
             done
             if [ -n "$WHEEL_URL" ]; then
-              sed -i "s|https://files.pythonhosted.org/packages/[^\"]*|${WHEEL_URL}|" PKGBUILD
+              sed -i "s|^source=.*|source=(\"${WHEEL_URL}\")|" PKGBUILD
             else
               echo "ERROR: wheel URL not found on PyPI for ${VERSION}" >&2
               exit 1
