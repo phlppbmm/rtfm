@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2026-04-09
+
+### Documentation
+
+- update CHANGELOG.md for v0.2.0
+
+### Fixed
+
+- remove broken sed on PKGBUILD source URLs
+
+### Miscellaneous
+
+- bump version to 0.2.1
 ## [0.2.0] - 2026-04-09
 
 ### CI
