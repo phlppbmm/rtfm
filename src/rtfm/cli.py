@@ -422,6 +422,32 @@ def remove(framework: str, config_path: str | None) -> None:
     storage.close()
 
 
+@cli.command(hidden=True)
+@click.option("--config", "config_path", default=None, help="Path to config.yaml")
+def nuke(config_path: str | None) -> None:
+    """Delete all indexed data and start fresh."""
+    import shutil
+
+    config = _load_config(config_path)
+    data_dir = Path(config.data_dir)
+
+    if not data_dir.exists():
+        console.print("[yellow]Nothing to nuke — data directory doesn't exist.[/yellow]")
+        return
+
+    size_mb = sum(f.stat().st_size for f in data_dir.rglob("*") if f.is_file()) / 1024 / 1024
+    console.print(f"[bold red]This will delete ALL indexed data ({size_mb:.1f} MB):[/bold red]")
+    console.print(f"  {data_dir}")
+    confirm = click.prompt("Type 'nuke' to confirm", default="", show_default=False)
+    if confirm != "nuke":
+        console.print("[yellow]Aborted.[/yellow]")
+        return
+
+    shutil.rmtree(data_dir)
+    console.print(f"[green]Nuked {data_dir} ({size_mb:.1f} MB freed).[/green]")
+    console.print("[dim]Run 'rtfm ingest' to rebuild.[/dim]")
+
+
 @cli.command()
 @click.option("--host", default=None, help="Host to bind to")
 @click.option("--port", default=None, type=int, help="Port to bind to")

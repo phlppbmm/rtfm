@@ -336,6 +336,12 @@ class _VersionRepository:
         ).fetchall()
         return {row["framework"]: (row["version_key"], row["ingested_at"]) for row in rows}
 
+    def delete(self, framework: str) -> None:
+        self._conn.execute("DELETE FROM source_versions WHERE framework = ?", (framework,))
+
+    def delete_all(self) -> None:
+        self._conn.execute("DELETE FROM source_versions")
+
 
 # ---------------------------------------------------------------------------
 # Schema initialisation (FTS5 + triggers = inherently raw SQL)
@@ -521,14 +527,18 @@ class Storage:
         ids = self._units.ids_for_framework(framework)
         self._symbols.delete_framework(framework)
         self._units.delete_framework(framework)
+        self._versions.delete(framework)
         self._conn.commit()
+        self._conn.execute("VACUUM")
         self._chroma_delete(ids)
 
     def clear_all(self) -> None:
         """Remove all data."""
         self._symbols.delete_all()
         self._units.delete_all()
+        self._versions.delete_all()
         self._conn.commit()
+        self._conn.execute("VACUUM")
 
         self._chroma_client.delete_collection("knowledge_units")
         self._collection = self._chroma_client.get_or_create_collection(
