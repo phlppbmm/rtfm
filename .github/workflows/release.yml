@@ -109,16 +109,19 @@ jobs:
   update-aur:
     needs: publish-pypi
     runs-on: ubuntu-latest
+    container: archlinux:base-devel
     strategy:
       matrix:
         package:
           - name: python-agent-rtfm
-            files: "PKGBUILD .SRCINFO"
           - name: python-agent-rtfm-bin
-            files: "PKGBUILD .SRCINFO"
           - name: python-agent-rtfm-git
-            files: "PKGBUILD .SRCINFO"
     steps:
+      - name: Set up Arch tooling
+        run: |
+          pacman -Sy --noconfirm namcap openssh git
+          # makepkg refuses to run as root — create a build user
+          useradd -m builder
       - name: Set up SSH
         env:
           AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
@@ -161,15 +164,18 @@ jobs:
             fi
           fi
 
-          # Regenerate .SRCINFO
-          if command -v makepkg &>/dev/null; then
-            makepkg --printsrcinfo > .SRCINFO
-          else
-            sed -i "s/^\tpkgver = .*/\tpkgver = ${VERSION}/" .SRCINFO
-            sed -i "s/^\tpkgrel = .*/\tpkgrel = 1/" .SRCINFO
-            sed -i "s|https://files.pythonhosted.org/packages/[^\t]*|${WHEEL_URL:-}|" .SRCINFO
-            sed -i "s/agent_rtfm-[0-9][0-9.]*[0-9]/agent_rtfm-${VERSION}/g" .SRCINFO
-          fi
+          # Regenerate .SRCINFO via makepkg (runs in Arch container)
+          chown -R builder: .
+          su builder -c "makepkg --printsrcinfo > .SRCINFO"
+      - name: Validate PKGBUILD
+        run: |
+          cd aur
+          namcap PKGBUILD
+          # Verify .SRCINFO is consistent
+          su builder -c "makepkg --printsrcinfo" | diff -u .SRCINFO - || {
+            echo "ERROR: .SRCINFO is out of sync with PKGBUILD" >&2
+            exit 1
+          }
       - name: Push to AUR
         run: |
           cd aur
