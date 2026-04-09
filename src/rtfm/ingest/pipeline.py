@@ -471,8 +471,10 @@ def ingest_all(
     """
     storage = Storage(config.data_dir, config.embedding_model)
 
+    cleared_all = False
     if rebuild and framework is None:
         storage.clear_all()
+        cleared_all = True
 
     sources = config.sources
     if framework:
@@ -490,5 +492,6 @@ def ingest_all(
         storage.close()
         return
 
-    _ingest_many(config, storage, names, rebuild=rebuild, as_json=as_json)
+    # If clear_all() already ran, no need to clear per-framework again
+    _ingest_many(config, storage, names, rebuild=rebuild and not cleared_all, as_json=as_json)
     storage.close()
