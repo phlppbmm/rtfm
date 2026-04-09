@@ -1,0 +1,67 @@
+name: Update chromadb-bin
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # Every Monday 6am UTC
+  workflow_dispatch:       # Manual trigger
+
+jobs:
+  check-and-update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for new chromadb version
+        id: check
+        run: |
+          LATEST=$(curl -s https://pypi.org/pypi/chromadb/json | jq -r '.info.version')
+          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+
+          # Clone current AUR package
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AUR_SSH_KEY }}" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          echo -e "Host aur.archlinux.org\n  IdentityFile ~/.ssh/aur\n  User aur" >> ~/.ssh/config
+          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+
+          git clone ssh://aur@aur.archlinux.org/python-chromadb-bin.git aur
+          CURRENT=$(grep '^pkgver=' aur/PKGBUILD | cut -d= -f2)
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+
+          if [ "$LATEST" != "$CURRENT" ]; then
+            echo "update=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "update=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update AUR package
+        if: steps.check.outputs.update == 'true'
+        run: |
+          VERSION="${{ steps.check.outputs.latest }}"
+          cd aur
+
+          # Get new wheel URL
+          WHEEL_URL=$(curl -s "https://pypi.org/pypi/chromadb/${VERSION}/json" | \
+            jq -r '.urls[] | select(.filename | test("cp39-abi3-manylinux.*x86_64.whl$")) | .url' | head -1)
+          WHEEL_FILE=$(basename "$WHEEL_URL")
+
+          # Update PKGBUILD
+          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+          OLD_CHROMADB_WHL=$(grep 'chromadb-.*\.whl' PKGBUILD | head -1 | grep -oP 'chromadb-[^"]+\.whl')
+          sed -i "s|${OLD_CHROMADB_WHL}|${WHEEL_FILE}|g" PKGBUILD
+          OLD_URL=$(grep 'chromadb-.*\.whl' PKGBUILD | head -1 | grep -oP 'https://[^"]+')
+          sed -i "s|${OLD_URL}|${WHEEL_URL}|" PKGBUILD
+
+          # Update .SRCINFO
+          sed -i "s/pkgver = .*/pkgver = ${VERSION}/" .SRCINFO
+          sed -i "s/pkgrel = .*/pkgrel = 1/" .SRCINFO
+          sed -i "s|${OLD_CHROMADB_WHL}|${WHEEL_FILE}|g" .SRCINFO
+          if [ -n "$OLD_URL" ]; then
+            sed -i "s|${OLD_URL}|${WHEEL_URL}|" .SRCINFO
+          fi
+
+          git config user.name "phlppbmm"
+          git config user.email "philipp.baumm@gmx.net"
+          git add PKGBUILD .SRCINFO
+          git diff --cached --quiet && exit 0
+          git commit -m "Update to chromadb ${VERSION}"
+          git push
