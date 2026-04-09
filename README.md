@@ -1,5 +1,12 @@
 # rtfm
 
+[![PyPI](https://img.shields.io/pypi/v/agent-rtfm?color=blue&label=PyPI)](https://pypi.org/project/agent-rtfm/)
+[![Python](https://img.shields.io/pypi/pyversions/agent-rtfm)](https://pypi.org/project/agent-rtfm/)
+[![License](https://img.shields.io/github/license/phlppbmm/rtfm)](https://github.com/phlppbmm/rtfm/blob/master/LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/phlppbmm/rtfm/ci.yml?label=CI)](https://github.com/phlppbmm/rtfm/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/phlppbmm/rtfm?label=Release)](https://github.com/phlppbmm/rtfm/releases/latest)
+[![AUR](https://img.shields.io/aur/version/python-agent-rtfm-bin?label=AUR)](https://aur.archlinux.org/packages/python-agent-rtfm-bin)
+
 Local documentation retrieval for agent-assisted development.
 
 Indexes framework documentation into typed **Knowledge Units** and exposes them via CLI and HTTP API. Built for LLM-powered workflows where agents need precise, up-to-date API references instead of relying on training data.
