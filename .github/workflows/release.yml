@@ -103,23 +103,41 @@ jobs:
           echo "  IdentityFile ~/.ssh/aur" >> ~/.ssh/config
           echo "  User aur" >> ~/.ssh/config
           ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
+      - uses: actions/checkout@v4
+        with:
+          path: source
       - name: Clone AUR repo
         run: git clone ssh://aur@aur.archlinux.org/${{ matrix.package.name }}.git aur
+      - name: Copy contrib files
+        run: |
+          cp source/contrib/arch/rtfm.service aur/ 2>/dev/null || true
+          cp source/contrib/arch/rtfm-restart.hook aur/ 2>/dev/null || true
+          cp source/contrib/arch/python-agent-rtfm.install aur/ 2>/dev/null || true
       - name: Update version
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           cd aur
           sed -i "s/^pkgver=.*/pkgver=${VERSION}/" PKGBUILD
           sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
-          sed -i "s/pkgver = .*/pkgver = ${VERSION}/" .SRCINFO
-          sed -i "s/pkgrel = .*/pkgrel = 1/" .SRCINFO
-          sed -i "s|agent_rtfm-[0-9.]*|agent_rtfm-${VERSION}|g" PKGBUILD .SRCINFO
+          # Regenerate .SRCINFO if makepkg is available, otherwise sed
+          if command -v makepkg &>/dev/null; then
+            makepkg --printsrcinfo > .SRCINFO
+          else
+            sed -i "s/pkgver = .*/pkgver = ${VERSION}/" .SRCINFO
+            sed -i "s/pkgrel = .*/pkgrel = 1/" .SRCINFO
+            sed -i "s|agent_rtfm-[0-9.]*|agent_rtfm-${VERSION}|g" .SRCINFO
+          fi
+          sed -i "s|agent_rtfm-[0-9.]*|agent_rtfm-${VERSION}|g" PKGBUILD
+          # Validate replacement succeeded
+          if ! grep -q "agent_rtfm-${VERSION}" PKGBUILD; then
+            echo "WARNING: version pattern not found in PKGBUILD source line" >&2
+          fi
       - name: Push to AUR
         run: |
           cd aur
           git config user.name "phlppbmm"
           git config user.email "philipp.baumm@gmx.net"
-          git add PKGBUILD .SRCINFO
-          git diff --cached --quiet && exit 0
+          git add -A
+          git diff --cached --quiet && echo "No changes to push" && exit 0
           git commit -m "Update to ${GITHUB_REF_NAME#v}"
           git push

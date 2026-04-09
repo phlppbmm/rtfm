@@ -69,7 +69,19 @@ rtfm ingest -f svelte --rebuild    # Force re-ingest
 rtfm up                            # Start server in background
 rtfm down                          # Stop background server
 rtfm serve                         # Foreground server (for systemd)
+rtfm systemd-setup                 # Install systemd user service + pacman hook
 ```
+
+## Systemd Integration (Arch Linux)
+
+```bash
+rtfm systemd-setup                 # Generates service files + optional pacman hook
+systemctl --user daemon-reload
+systemctl --user enable --now rtfm  # Start server on login
+systemctl --user enable rtfm-update # Auto-update docs on boot
+```
+
+The update service runs `rtfm update` once on boot before the server starts, keeping indexes fresh. The pacman hook automatically restarts the server after package upgrades.
 
 ## Configuration
 
@@ -187,8 +199,10 @@ Every ingested source gets a health score (0-100, grade A-F) based on:
 | Signal | What it measures |
 |--------|-----------------|
 | Type diversity | Are api/example/concept/pitfall all present? |
+| Type dominance | Is a single type >90% of all units? |
 | Definition coverage | % of symbols with canonical definition sites |
 | Content quality | Average content length, stub ratio |
+| Template stubs | % of units with unresolved template placeholders |
 | Changelog noise | % of units from release notes / changelogs |
 | Doc system detection | Was a specialized parser used? |
 

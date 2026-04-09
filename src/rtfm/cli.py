@@ -558,6 +558,116 @@ def down(config_path: str | None) -> None:
     console.print(f"[green]Server stopped (PID {pid}).[/green]")
 
 
+_SYSTEMD_UNIT = """\
+[Unit]
+Description=rtfm documentation retrieval server
+After=network.target rtfm-update.service
+
+[Service]
+Type=simple
+ExecStart={exec_start}
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+"""
+
+_SYSTEMD_UPDATE = """\
+[Unit]
+Description=Update rtfm documentation indexes
+Before=rtfm.service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart={exec_update}
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target
+"""
+
+_PACMAN_HOOK = """\
+[Trigger]
+Operation = Upgrade
+Type = Package
+Target = python-agent-rtfm
+Target = python-agent-rtfm-bin
+Target = python-agent-rtfm-git
+
+[Action]
+Description = Restarting rtfm server...
+When = PostTransaction
+Exec = /usr/bin/systemctl --global restart rtfm.service
+NeedsTargets
+"""
+
+
+def _is_pacman_installed() -> bool:
+    """Check if rtfm was installed via pacman (service file already shipped)."""
+    return Path("/usr/lib/systemd/user/rtfm.service").exists()
+
+
+@cli.command("systemd-setup")
+@click.option("--config", "config_path", default=None, help="Path to config.yaml")
+def systemd_setup(config_path: str | None) -> None:
+    """Install a systemd user service and optional pacman hook."""
+    import shutil
+
+    if _is_pacman_installed():
+        console.print("[green]Service files already installed by pacman.[/green]")
+        console.print()
+        console.print("[bold]Run:[/bold]")
+        console.print("  systemctl --user daemon-reload")
+        console.print("  systemctl --user enable --now rtfm")
+        console.print("  systemctl --user enable rtfm-update  # auto-update on boot")
+        return
+
+    config = _load_config(config_path)
+    rtfm_bin = shutil.which("rtfm") or "rtfm"
+
+    serve_cmd = f"{rtfm_bin} serve --host {config.host} --port {config.port}"
+    update_cmd = f"{rtfm_bin} update"
+    if config_path:
+        serve_cmd += f" --config {config_path}"
+        update_cmd += f" --config {config_path}"
+
+    unit_dir = Path.home() / ".config" / "systemd" / "user"
+    unit_dir.mkdir(parents=True, exist_ok=True)
+
+    unit_file = unit_dir / "rtfm.service"
+    unit_file.write_text(_SYSTEMD_UNIT.format(exec_start=serve_cmd))
+    console.print(f"[green]Wrote {unit_file}[/green]")
+
+    update_file = unit_dir / "rtfm-update.service"
+    update_file.write_text(_SYSTEMD_UPDATE.format(exec_update=update_cmd))
+    console.print(f"[green]Wrote {update_file}[/green]")
+
+    hook_dir = Path("/etc/pacman.d/hooks")
+    if hook_dir.exists():
+        hook_file = hook_dir / "rtfm-restart.hook"
+        try:
+            hook_file.write_text(_PACMAN_HOOK)
+            console.print(f"[green]Wrote {hook_file}[/green]")
+        except PermissionError:
+            console.print(f"[yellow]Skipped pacman hook (need sudo for {hook_dir})[/yellow]")
+            console.print(f"[dim]  sudo install -Dm644 /dev/stdin {hook_file} << 'EOF'[/dim]")
+            for line in _PACMAN_HOOK.strip().splitlines():
+                console.print(f"[dim]  {line}[/dim]")
+            console.print("[dim]  EOF[/dim]")
+
+    console.print()
+    console.print("[bold]Next steps:[/bold]")
+    console.print("  systemctl --user daemon-reload")
+    console.print("  systemctl --user enable --now rtfm")
+    console.print("  systemctl --user enable rtfm-update  # auto-update on boot")
+    console.print()
+    console.print("[dim]Check status: systemctl --user status rtfm[/dim]")
+    console.print("[dim]View logs:    journalctl --user -u rtfm -f[/dim]")
+
+
 @cli.command()
 def init() -> None:
     """Create ~/.rtfm/ with a default config.yaml."""
