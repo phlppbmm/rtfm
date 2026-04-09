@@ -145,20 +145,18 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           cd aur
+          # Only update pkgver and pkgrel — PKGBUILDs use ${pkgver} in
+          # source URLs and paths, so no other replacements needed.
           sed -i "s/^pkgver=.*/pkgver=${VERSION}/" PKGBUILD
           sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
-          # Regenerate .SRCINFO if makepkg is available, otherwise sed
+          # Regenerate .SRCINFO (expands ${pkgver} in source URLs)
           if command -v makepkg &>/dev/null; then
             makepkg --printsrcinfo > .SRCINFO
           else
-            sed -i "s/pkgver = .*/pkgver = ${VERSION}/" .SRCINFO
-            sed -i "s/pkgrel = .*/pkgrel = 1/" .SRCINFO
-            sed -i "s|agent_rtfm-[0-9.]*|agent_rtfm-${VERSION}|g" .SRCINFO
-          fi
-          sed -i "s|agent_rtfm-[0-9.]*|agent_rtfm-${VERSION}|g" PKGBUILD
-          # Validate replacement succeeded
-          if ! grep -q "agent_rtfm-${VERSION}" PKGBUILD; then
-            echo "WARNING: version pattern not found in PKGBUILD source line" >&2
+            sed -i "s/^\\tpkgver = .*/\\tpkgver = ${VERSION}/" .SRCINFO
+            sed -i "s/^\\tpkgrel = .*/\\tpkgrel = 1/" .SRCINFO
+            # Expand ${pkgver} in source/noextract lines
+            sed -i "s/agent_rtfm-[0-9][0-9.]*[0-9]/agent_rtfm-${VERSION}/g" .SRCINFO
           fi
       - name: Push to AUR
         run: |
