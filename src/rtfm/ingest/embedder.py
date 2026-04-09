@@ -34,7 +34,15 @@ class Embedder:
 
 
 def worker_init() -> None:
-    """ProcessPoolExecutor initializer: pre-load the model in each worker."""
+    """ProcessPoolExecutor initializer: pre-load the model in each worker.
+
+    Workers ignore SIGINT — the main process handles shutdown and kills
+    workers explicitly. Without this, Ctrl+C sends SIGINT to the entire
+    process group and workers dump tracebacks before our handler runs.
+    """
+    import signal
+
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
     Embedder.get_instance()
 
 
