@@ -1,6 +1,6 @@
 # rtfm
 
-Local documentation retrieval service for agent-assisted development.
+Local documentation retrieval for agent-assisted development.
 
 Indexes framework documentation into typed **Knowledge Units** and exposes them via CLI and HTTP API. Built for LLM-powered workflows where agents need precise, up-to-date API references instead of relying on training data.
 
@@ -26,66 +26,37 @@ rtfm init                          # Create ~/.rtfm/config.yaml
 # Edit config to add your frameworks, then:
 rtfm ingest                        # Download & index documentation
 rtfm up                            # Start server in background
-# ... later:
-rtfm down                          # Stop server
 ```
 
 ## Usage
 
-All query commands require a running server (`rtfm up`).
-
-### Search
-
-Hybrid semantic + keyword search across all indexed documentation.
-
 ```bash
-rtfm search "dependency injection" -f fastapi
-rtfm search "reactive state" -f svelte -t example -v
-rtfm search "mapped_column" -f sqlalchemy --json
+# Topic search — returns API refs, examples, concepts, pitfalls
+rtfm dependency injection -f fastapi
+rtfm "reactive state" -f svelte
+rtfm WebSocket -f fastapi -k 3
+
+# Symbol lookup — single word triggers exact match
+rtfm Depends -f fastapi
+rtfm '$state' -f svelte
+rtfm Client -f reqwest
 ```
 
-### Lookup
+Output is **JSON when piped** (for agents), **formatted text in terminal** (for humans). Override with `--json` or `--pretty`.
 
-Exact symbol lookup by function, class, or component name.
-
-```bash
-rtfm lookup Depends -f fastapi
-rtfm lookup '$state' -f svelte
-rtfm lookup WebSocket --no-related
-```
-
-### Browse
-
-Structural navigation of indexed documentation.
-
-```bash
-rtfm browse fastapi                # List all modules
-rtfm browse fastapi -m security    # Drill into a module
-```
-
-### Bundle
-
-Get everything about a topic in one call — APIs, examples, concepts, and pitfalls grouped by type.
-
-```bash
-rtfm bundle "authentication" -f fastapi
-rtfm bundle "WebSocket" -f fastapi --json
-rtfm bundle "reactive state" -f svelte -k 3 -v
-```
+Single-word queries try symbol lookup first, then fall back to topic search. Multi-word queries return a topic bundle grouped by type.
 
 ### Admin
 
 ```bash
-rtfm status                        # Live update check, unit counts, disk usage
+rtfm status                        # Health scores, unit counts, update check
 rtfm update                        # Re-ingest outdated sources
 rtfm remove tauri                  # Remove a framework's data
 rtfm ingest -f svelte --rebuild    # Force re-ingest
-rtfm up                            # Start server in background (no terminal window)
+rtfm up                            # Start server in background
 rtfm down                          # Stop background server
-rtfm serve                         # Start server in foreground (for systemd)
+rtfm serve                         # Foreground server (for systemd)
 ```
-
-All query commands support `--json` for machine-readable output.
 
 ## Configuration
 
@@ -93,13 +64,14 @@ All query commands support `--json` for machine-readable output.
 
 ```yaml
 embedding_model: nomic-ai/nomic-embed-text-v1.5
+min_health_score: 80               # Reject imports scoring below this
 
 server:
   host: 127.0.0.1
   port: 8787
 
 sources:
-  # llms.txt — simplest source, single pre-built markdown file
+  # llms.txt — single pre-built markdown file
   svelte:
     type: llms_txt
     url: https://svelte.dev/llms-full.txt
@@ -113,31 +85,31 @@ sources:
     glob: "**/*.md"
     language: python
 
-  # Website + sitemap — crawl filtered URLs from sitemap.xml
+  # Website + sitemap
   claude-agent-sdk:
     type: website
     sitemap: https://platform.claude.com/sitemap.xml
-    url_filter: "/docs/en/agent-sdk/"
+    url_filter: "/docs/en/managed-agents/"
     language: python
 
-  # Website + wildcard — crawl all links under a URL prefix
+  # Website + wildcard crawl
   tokio:
     type: website
     url: https://tokio.rs/tokio/tutorial/*
     language: rust
 
-  # Website + wildcard — works with docs.rs too
+  # docs.rs (auto-detected as rustdoc, parsed from raw HTML)
   reqwest:
     type: website
     url: https://docs.rs/reqwest/latest/reqwest/*
     language: rust
 
-  # Local markdown files
-  # my_docs:
-  #   type: local
-  #   path: /path/to/docs
-  #   glob: "**/*.md"
-  #   language: python
+  # TypeDoc (explicit doc_system for github.io sites)
+  jira-js:
+    type: website
+    url: https://mrrefactoring.github.io/jira.js/*
+    language: javascript
+    doc_system: typedoc
 ```
 
 ### Source Types
@@ -148,16 +120,21 @@ sources:
 | `github` | Git sparse checkout of a docs directory | Commit SHA |
 | `local` | Reads files from the local filesystem | File hash |
 | `website` + `sitemap` | Sitemap → filter URLs → fetch HTML → convert to Markdown | Sitemap hash |
-| `website` + `url: .../path/*` | Crawl start page, discover all links under prefix | Per-page ETag |
-| `website` + `urls` | Explicit URL list (fallback for JS-rendered sites) | Per-page ETag |
+| `website` + `url: .../path/*` | Crawl start page, discover all links under prefix | URL set hash |
 
-Website sources use per-page ETag caching — on re-ingest, only changed pages are re-fetched.
+### Doc System Detection
 
-### Supported Languages
+rtfm auto-detects the documentation system and uses a specialized parser:
 
-Symbol extraction works for: Python, Rust, JavaScript/TypeScript, Go, C/C++, Java, C#.
+| System | Detection | Sources |
+|--------|-----------|---------|
+| Sphinx/RST | `.. autoclass::` directives | sqlalchemy, numpy |
+| MkDocs | `!!! admonition`, `::: module.path` inserts | fastapi, pydantic, polars |
+| rustdoc | `docs.rs` URL or `class="rustdoc"` in HTML | reqwest |
+| TypeDoc | `class="tsd-"` in HTML or `doc_system: typedoc` | jira-js |
+| llms.txt | `type: llms_txt` in config | svelte, tauri, claude-code |
 
-Set `language` in your source config to the programming language of the code examples (e.g. `javascript` for Svelte, `python` for FastAPI). This enables symbol-based lookup (`rtfm lookup`).
+Override with `doc_system:` in source config when auto-detection fails.
 
 ## How It Works
 
@@ -165,41 +142,44 @@ Set `language` in your source config to the programming language of the code exa
 
 ```
 Source (GitHub / HTTP / local / website)
-  -> Downloader (sparse checkout, HTTP GET, file read, crawl + HTML->MD)
-    -> Parser (Markdown + RST heading-aware splitter)
-      -> Extractor (multi-label classifier + symbol extraction)
-        -> Storage (SQLite + ChromaDB)
+  → Downloader (sparse checkout, HTTP GET, file read, crawl + HTML→MD or raw HTML)
+    → Parser (doc-system-aware: Sphinx, MkDocs, rustdoc, TypeDoc, generic MD)
+      → Extractor (classifier + symbol extraction + definition site tracking)
+        → Storage (SQLite + ChromaDB)
 ```
 
-**Parser** splits documents at heading boundaries, tracking a full heading hierarchy (e.g. `["ORM", "Session", "execute()"]`). Supports both Markdown (`##`) and reStructuredText (`===` underline) heading styles.
+**Parser** splits documents at heading boundaries (or autodoc directive boundaries for Sphinx). Tracks a full heading hierarchy. Doc-system-specific parsers handle HTML directly (rustdoc, TypeDoc) instead of losing structure in HTML→MD conversion.
 
-**Classifier** assigns each section one or more types using structured signals. A section can be both `api` and `pitfall` (e.g. a deprecated API reference):
-- Sphinx directives (`.. autoclass::`, `.. warning::`, `.. deprecated::`)
-- MkDocs admonitions (`!!! warning`, `!!! example`)
-- FastAPI Blocks syntax (`/// warning`, `/// danger`)
-- Code analysis (definitions in code blocks -> `api`, long code -> `example`)
-- Text signals (`breaking change`, `deprecated` -> `pitfall`)
+**Extractor** assigns each section one or more types and extracts symbols. **Definition sites** are tracked — sections where a symbol is canonically defined (via `.. autoclass::`, `::: module.Symbol`, rustdoc struct definitions, etc.) are marked so lookup always returns the authoritative reference, not a random mention.
 
-**Symbol extraction** finds function/class/interface names from code blocks, RST autodoc directives (`.. autoclass:: Session`), and inline code in headings (`` `Depends` ``).
+**Relevance decay** downweights release notes, changelogs, and migration guides so they don't dominate search results over actual documentation.
 
 ### Dual-Index Storage
 
 | SQLite + FTS5 | ChromaDB |
 |---------------|----------|
-| Keyword search (BM25 ranking) | Semantic search (cosine similarity) |
+| Keyword search (BM25) | Semantic search (cosine similarity) |
 | Exact symbol lookup | Conceptual similarity |
-| Structural browsing | "How do I do X" queries |
+| Definition site ranking | "How do I do X" queries |
 | Metadata, versions | Vector embeddings (nomic-embed-text-v1.5) |
 
 ### Hybrid Search (RRF)
 
-Queries run against both indexes in parallel. Results are merged using [Reciprocal Rank Fusion](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf) (k=60):
+Queries run against both indexes in parallel. Results are merged using Reciprocal Rank Fusion (k=60), then multiplied by per-unit relevance decay.
 
-```
-score(doc) = 1/(k + rank_semantic) + 1/(k + rank_keyword)
-```
+### Import Health Score
 
-This combines the strengths of both: semantic search finds conceptually related docs ("how do I authenticate" -> OAuth2 tutorial), keyword search finds exact matches ("mapped_column" -> the exact API reference).
+Every ingested source gets a health score (0-100, grade A-F) based on:
+
+| Signal | What it measures |
+|--------|-----------------|
+| Type diversity | Are api/example/concept/pitfall all present? |
+| Definition coverage | % of symbols with canonical definition sites |
+| Content quality | Average content length, stub ratio |
+| Changelog noise | % of units from release notes / changelogs |
+| Doc system detection | Was a specialized parser used? |
+
+Sources scoring below `min_health_score` (default: 80) are auto-rejected during ingest.
 
 ## Knowledge Unit Types
 
@@ -210,11 +190,40 @@ This combines the strengths of both: semantic search finds conceptually related 
 | `concept` | Explanatory text about a pattern or architecture |
 | `pitfall` | Gotchas, breaking changes, deprecations + workarounds |
 
-A section can have multiple types. An API reference with a deprecation warning produces both an `api` and a `pitfall` unit, so `rtfm bundle` finds it in both buckets.
+## Architecture
+
+```
+src/rtfm/
+  models.py              KnowledgeUnit, configs, Pydantic response models
+  cli.py                 Agent-first CLI: rtfm <query> -f <framework>
+  server.py              FastAPI HTTP API
+  storage.py             Dual-index: ChromaDB (semantic) + SQLite/FTS5 (keyword)
+  search.py              Hybrid search (RRF), symbol lookup, bundle
+  health.py              Import health score computation
+  reporter.py            CLI progress rendering
+  ingest/
+    pipeline.py          Orchestrates download → parse → extract → store
+    detect.py            Auto-detection of doc systems
+    downloaders.py       GitHub, HTTP, local, website (sitemap/crawl/HTML→MD)
+    parsers/
+      base.py            Parser protocol + Section dataclass
+      generic_md.py      Markdown + RST (default fallback)
+      sphinx_rst.py      Sphinx autodoc directive splitting
+      mkdocs_md.py       MkDocs/Material
+      rustdoc_html.py    docs.rs raw HTML parsing
+      typedoc_html.py    TypeDoc raw HTML parsing
+    extractors/
+      base.py            Extractor protocol
+      generic.py         Multi-label classifier + symbol extraction
+      sphinx.py          Autodoc definition sites + changelog decay
+      mkdocs.py          mkdocstrings definition sites
+      rustdoc.py         All-API extractor for rustdoc
+      typedoc.py         All-API extractor for TypeDoc
+```
 
 ## HTTP API
 
-All endpoints are also available via HTTP when the server is running.
+All endpoints are available via HTTP when the server is running.
 
 | Endpoint | Description |
 |----------|-------------|
@@ -225,48 +234,12 @@ All endpoints are also available via HTTP when the server is running.
 
 Swagger UI: http://127.0.0.1:8787/docs
 
-Response models are fully typed with Pydantic — Swagger shows complete JSON schemas for all endpoints.
-
-## Architecture
-
-```
-src/rtfm/
-  models.py              KnowledgeUnit, configs, Pydantic response models
-  cli.py                 Click CLI: search, lookup, browse, bundle, up, down, status, ...
-  server.py              FastAPI with Annotated params, Depends, response models
-  storage.py             Dual-index: ChromaDB (semantic) + SQLite/FTS5 (keyword)
-  search.py              Hybrid search (RRF), symbol lookup, browse, bundle
-  ingest/
-    pipeline.py          Orchestrates download -> parse -> extract -> store
-    downloaders.py       GitHub, HTTP, local, website (sitemap/crawl/HTML->MD + ETag cache)
-    parser.py            Markdown + RST -> Sections (heading-aware splitter)
-    extractor.py         Sections -> KnowledgeUnits (multi-label classifier + symbols)
-```
-
-## Data Storage
-
-```
-~/.rtfm/
-  config.yaml            Source configuration
-  server.pid             Background server PID
-  server.log             Background server log
-  data/
-    rtfm.db              SQLite (units, symbols, versions, FTS5 index)
-    chroma/              ChromaDB vector index
-  cache/
-    <source>.json        Per-page ETag + Markdown cache for website sources
-```
-
 ## Development
 
 ```bash
-uv sync                                          # Install dependencies
-uv run python -m pytest tests/ -v                # Run tests (138 tests)
-uv run python -m pytest tests/ --cov=rtfm        # Coverage report
-uv run ruff check src/rtfm/                      # Linter
-uv run mypy src/rtfm/                            # Type checking (strict)
-uv run pyright src/rtfm/                         # Type checking (strict)
-uv run ty check src/rtfm/                        # Type checking
+uv sync
+uv run python -m pytest tests/ -v     # 200 tests
+uv run ruff check src/rtfm/
 ```
 
 ## License
