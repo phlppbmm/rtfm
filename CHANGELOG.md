@@ -2,7 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.2.0] - 2026-04-09
+
+### CI
+
+- add git-cliff changelog generation to release pipeline
+
+### Miscellaneous
+
+- bump version to 0.2.0
 
 ### Other
 
