@@ -281,18 +281,25 @@ async def _ingest_many_async(
         initializer=_embed_worker_init,
     )
 
-    # Ensure worker processes are cleaned up on interrupt
+    # Ensure worker processes are cleaned up on interrupt.
+    # asyncio.to_thread() threads are not interruptible, so we kill
+    # workers and hard-exit on signal instead of trying to await cleanup.
     loop = asyncio.get_running_loop()
-    cancelled = False
+    results: dict[str, int] = {}
 
     def _shutdown_on_signal() -> None:
-        nonlocal cancelled
-        if cancelled:
-            return
-        cancelled = True
         embed_executor.shutdown(wait=False, cancel_futures=True)
-        for task in asyncio.all_tasks(loop):
-            task.cancel()
+        for pid in _get_executor_pids(embed_executor):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+        total = sum(results.values())
+        reporter.log("Interrupted — cleaning up workers...")
+        if total:
+            reporter.log(f"Total: {total} units ingested across {len(results)} sources")
+        # Hard exit — to_thread() threads can't be cancelled
+        os._exit(130)
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, _shutdown_on_signal)
@@ -302,7 +309,6 @@ async def _ingest_many_async(
             for name in sources:
                 reporter.add(name, name, status="pending")
 
-            results: dict[str, int] = {}
             try:
                 async with asyncio.TaskGroup() as tg:
                     for name in sources:
@@ -318,14 +324,13 @@ async def _ingest_many_async(
                             results=results,
                         ))
             except* (KeyboardInterrupt, asyncio.CancelledError):
-                reporter.log("Interrupted — cleaning up workers...")
+                pass
 
             total_units = sum(results.values())
             if total_units:
                 reporter.log(f"Total: {total_units} units ingested across {len(results)} sources")
     finally:
         embed_executor.shutdown(wait=False, cancel_futures=True)
-        # Kill any remaining worker processes
         for pid in _get_executor_pids(embed_executor):
             try:
                 os.kill(pid, signal.SIGKILL)
