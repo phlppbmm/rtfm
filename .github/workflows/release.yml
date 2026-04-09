@@ -126,13 +126,16 @@ jobs:
         env:
           AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
         run: |
-          mkdir -p ~/.ssh
-          echo "$AUR_SSH_KEY" > ~/.ssh/aur
-          chmod 600 ~/.ssh/aur
-          echo "Host aur.archlinux.org" >> ~/.ssh/config
-          echo "  IdentityFile ~/.ssh/aur" >> ~/.ssh/config
-          echo "  User aur" >> ~/.ssh/config
-          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
+          mkdir -p /root/.ssh
+          echo "$AUR_SSH_KEY" > /root/.ssh/aur
+          chmod 600 /root/.ssh/aur
+          cat > /root/.ssh/config << 'SSHEOF'
+          Host aur.archlinux.org
+            IdentityFile /root/.ssh/aur
+            User aur
+            StrictHostKeyChecking accept-new
+          SSHEOF
+          chmod 600 /root/.ssh/config
       - uses: actions/checkout@v4
         with:
           path: source
