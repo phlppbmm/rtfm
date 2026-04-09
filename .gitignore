@@ -10,3 +10,5 @@ build/
 *.db
 .coverage
 uv.lock
+.claude/
+issues/
