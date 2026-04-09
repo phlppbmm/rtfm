@@ -28,6 +28,7 @@ class HealthDetail:
     total_symbols: int = 0
     definition_symbols: int = 0
     decayed_units: int = 0
+    template_stub_count: int = 0  # units with unresolved template placeholders
     doc_system: str = ""
 
     # Derived ratios
@@ -126,6 +127,24 @@ def compute_health(conn: sqlite3.Connection, framework: str) -> HealthDetail:
     if types_present >= 3:
         signals.append(f"{types_present}/4 type diversity")
 
+    # Type dominance — a single type >90% of all units means retrieval
+    # is one-dimensional; queries outside that type's strength will miss.
+    if h.total_units > 20:
+        max_count = max(h.api_count, h.example_count, h.concept_count, h.pitfall_count)
+        dominance = max_count / h.total_units
+        if dominance > 0.95:
+            score -= 20
+            dominant_type = (
+                "api" if max_count == h.api_count
+                else "example" if max_count == h.example_count
+                else "concept" if max_count == h.concept_count
+                else "pitfall"
+            )
+            signals.append(f"{dominance:.0%} units are {dominant_type} (mono-type)")
+        elif dominance > 0.90:
+            score -= 8
+            signals.append(f"{dominance:.0%} single-type dominance")
+
     # Stub ratio (0-20 points deducted)
     if h.stub_ratio > 0.5:
         score -= 20
@@ -155,6 +174,24 @@ def compute_health(conn: sqlite3.Connection, framework: str) -> HealthDetail:
     elif h.avg_content_len < 300:
         score -= 5
         signals.append(f"avg content {h.avg_content_len:.0f} chars (short)")
+
+    # Template stub detection — content that contains unresolved template
+    # placeholders (e.g. {{code_block(...)}}) looks long but is useless.
+    if h.total_units > 0:
+        tmpl_row = conn.execute(
+            "SELECT COUNT(*) FROM units WHERE framework=? AND "
+            "(content LIKE '%{{%}}%' OR content LIKE '%{%- %-%}%')",
+            (framework,),
+        ).fetchone()
+        tmpl_count = tmpl_row[0] if tmpl_row else 0
+        h.template_stub_count = tmpl_count
+        tmpl_ratio = tmpl_count / h.total_units
+        if tmpl_ratio > 0.3:
+            score -= 15
+            signals.append(f"{tmpl_ratio:.0%} units have unresolved template placeholders")
+        elif tmpl_ratio > 0.1:
+            score -= 8
+            signals.append(f"{tmpl_ratio:.0%} template placeholders")
 
     # Changelog noise (0-10 points deducted)
     if h.decay_ratio > 0.5:
