@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync
+      - run: uv run python -m pytest tests/ -q
+
+  publish-pypi:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build
+      - name: Publish to PyPI
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: uv publish
+
+  build-executables:
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: rtfm-linux-x86_64
+          - os: windows-latest
+            artifact: rtfm-windows-x86_64.exe
+          - os: macos-latest
+            artifact: rtfm-macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync
+      - run: uv pip install pyinstaller
+      - name: Build executable
+        run: |
+          uv run pyinstaller --onefile --name rtfm --hidden-import rtfm.server --hidden-import rtfm.ingest.pipeline --hidden-import rtfm.ingest.parsers.sphinx_rst --hidden-import rtfm.ingest.parsers.mkdocs_md --hidden-import rtfm.ingest.parsers.rustdoc_html --hidden-import rtfm.ingest.parsers.typedoc_html --hidden-import rtfm.ingest.extractors.sphinx --hidden-import rtfm.ingest.extractors.mkdocs --hidden-import rtfm.ingest.extractors.rustdoc --hidden-import rtfm.ingest.extractors.typedoc --hidden-import rtfm.health src/rtfm/cli.py
+      - name: Rename artifact
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            mv dist/rtfm.exe "dist/${{ matrix.artifact }}"
+          else
+            mv dist/rtfm "dist/${{ matrix.artifact }}"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}
+
+  create-release:
+    needs: [publish-pypi, build-executables]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            artifacts/*

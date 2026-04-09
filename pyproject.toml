@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "rtfm"
+name = "agent-rtfm"
 version = "0.1.0"
 description = "Local documentation retrieval service for agent-assisted development"
 requires-python = ">=3.11"
