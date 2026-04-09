@@ -111,6 +111,7 @@ jobs:
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     strategy:
+      fail-fast: false
       matrix:
         package:
           - name: python-agent-rtfm
@@ -155,11 +156,17 @@ jobs:
           sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
 
           # For -bin package: resolve the hash-based PyPI wheel URL
+          # Retry because PyPI may take a few seconds to propagate after publish
           if grep -q 'files.pythonhosted.org/packages/' PKGBUILD; then
-            WHEEL_URL=$(curl -sL "https://pypi.org/simple/agent-rtfm/" \
-              | grep -o "https://[^\"#]*agent_rtfm-${VERSION}-py3-none-any\\.whl" | head -1)
+            WHEEL_URL=""
+            for attempt in 1 2 3 4 5; do
+              WHEEL_URL=$(curl -sL "https://pypi.org/simple/agent-rtfm/" \
+                | grep -o "https://[^\"#]*agent_rtfm-${VERSION}-py3-none-any\\.whl" | head -1)
+              [ -n "$WHEEL_URL" ] && break
+              echo "Waiting for PyPI to propagate wheel (attempt ${attempt}/5)..."
+              sleep 15
+            done
             if [ -n "$WHEEL_URL" ]; then
-              # Replace the full source URL (everything after ::)
               sed -i "s|https://files.pythonhosted.org/packages/[^\"]*|${WHEEL_URL}|" PKGBUILD
             else
               echo "ERROR: wheel URL not found on PyPI for ${VERSION}" >&2
