@@ -78,3 +78,39 @@ jobs:
             --title "${{ github.ref_name }}" \
             --generate-notes \
             artifacts/*
+
+  update-aur:
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up SSH
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$AUR_SSH_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          echo "Host aur.archlinux.org" >> ~/.ssh/config
+          echo "  IdentityFile ~/.ssh/aur" >> ~/.ssh/config
+          echo "  User aur" >> ~/.ssh/config
+          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
+      - name: Clone AUR repo
+        run: git clone ssh://aur@aur.archlinux.org/python-agent-rtfm.git aur
+      - name: Update PKGBUILD
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          cd aur
+          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+          sed -i "s/pkgver = .*/pkgver = ${VERSION}/" .SRCINFO
+          sed -i "s/pkgrel = .*/pkgrel = 1/" .SRCINFO
+          sed -i "s|agent_rtfm-.*\.tar\.gz|agent_rtfm-${VERSION}.tar.gz|g" .SRCINFO
+      - name: Push to AUR
+        run: |
+          cd aur
+          git config user.name "phlppbmm"
+          git config user.email "philipp.baumm@gmx.net"
+          git add PKGBUILD .SRCINFO
+          git diff --cached --quiet && exit 0
+          git commit -m "Update to ${GITHUB_REF_NAME#v}"
+          git push
