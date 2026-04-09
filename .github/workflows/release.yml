@@ -66,18 +66,45 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
+      - name: Install git-cliff
+        run: pip install git-cliff
+      - name: Generate release notes
+        run: git-cliff --latest --strip header -o RELEASE_NOTES.md
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ github.ref_name }}" \
             --title "${{ github.ref_name }}" \
-            --generate-notes \
+            --notes-file RELEASE_NOTES.md \
             artifacts/*
+
+  update-changelog:
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: master
+      - name: Install git-cliff
+        run: pip install git-cliff
+      - name: Update CHANGELOG.md
+        run: git-cliff -o CHANGELOG.md
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git diff --cached --quiet && echo "No changelog changes" && exit 0
+          git commit -m "docs: update CHANGELOG.md for ${GITHUB_REF_NAME}"
+          git push
 
   update-aur:
     needs: publish-pypi
@@ -111,6 +138,7 @@ jobs:
       - name: Copy contrib files
         run: |
           cp source/contrib/arch/rtfm.service aur/ 2>/dev/null || true
+          cp source/contrib/arch/rtfm-update.service aur/ 2>/dev/null || true
           cp source/contrib/arch/rtfm-restart.hook aur/ 2>/dev/null || true
           cp source/contrib/arch/python-agent-rtfm.install aur/ 2>/dev/null || true
       - name: Update version
