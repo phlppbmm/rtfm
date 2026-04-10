@@ -281,11 +281,16 @@ def status(config_path: str | None, no_check: bool, as_json: bool) -> None:
     health = compute_all_health(storage.conn)
     storage.close()
 
+    # Server status
+    server_pid = _server_pid()
+    server_running = server_pid is not None and _port_responding(config.host, config.port)
+
     if not stats:
         if as_json:
-            click.echo(json_mod.dumps({"sources": [], "total_units": 0}))
+            click.echo(json_mod.dumps({"sources": [], "total_units": 0, "server": "up" if server_running else "down"}))
         else:
-            console.print("[yellow]No data ingested yet.[/yellow]")
+            console.print(f"[dim]Server:[/dim] {'[green]running[/green]' if server_running else '[red]stopped[/red]'}")
+            console.print("[yellow]No data ingested yet. Run 'rtfm ingest' to index docs.[/yellow]")
         return
 
     frameworks = sorted(stats.keys())
@@ -355,6 +360,7 @@ def status(config_path: str | None, no_check: bool, as_json: bool) -> None:
                 for fw in frameworks
             ],
             "total_units": sum(c.get("total", 0) for c in stats.values()),
+            "server": "up" if server_running else "down",
         }
         click.echo(json_mod.dumps(payload, ensure_ascii=False, indent=2))
         return
@@ -368,9 +374,11 @@ def status(config_path: str | None, no_check: bool, as_json: bool) -> None:
     cache_path = Path(default_home()) / "cache"
     cache_bytes = sum(f.stat().st_size for f in cache_path.rglob("*") if f.is_file()) if cache_path.exists() else 0
 
+    server_label = "[green]running[/green]" if server_running else "[red]stopped[/red]"
     console.print(
         f"[dim]{len(frameworks)} sources, {total_units} units, "
-        f"data {_human_size(disk_bytes)}, cache {_human_size(cache_bytes)}[/dim]"
+        f"data {_human_size(disk_bytes)}, cache {_human_size(cache_bytes)}, "
+        f"server[/dim] {server_label}"
     )
     outdated_count = sum(1 for s in update_state.values() if s == "outdated")
     if outdated_count:

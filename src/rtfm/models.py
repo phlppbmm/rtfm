@@ -173,6 +173,8 @@ class AppConfig:
     def __post_init__(self) -> None:
         if not self.data_dir:
             self.data_dir = str(Path(default_home()) / "data")
+        else:
+            self.data_dir = str(Path(self.data_dir).expanduser())
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Self:
