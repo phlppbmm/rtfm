@@ -26,7 +26,13 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv build
       - name: Publish to PyPI (Trusted Publisher)
-        run: uv publish --trusted-publishing always
+        run: |
+          uv publish --trusted-publishing always || {
+            # PyPI returns 400 when the file already exists — treat as success
+            pip index versions agent-rtfm 2>/dev/null | grep -q "${GITHUB_REF_NAME#v}" \
+              && echo "Version already on PyPI — continuing." \
+              || exit 1
+          }
 
   build-executables:
     needs: test
