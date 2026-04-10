@@ -123,6 +123,9 @@ jobs:
           pacman -Sy --noconfirm namcap openssh git
           # makepkg refuses to run as root — create a build user
           useradd -m builder
+          # The aur dir gets chown'd to builder for makepkg, but later
+          # steps run as root. Mark all dirs safe (throwaway container).
+          git config --global --add safe.directory '*'
       - name: Set up SSH
         env:
           AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
