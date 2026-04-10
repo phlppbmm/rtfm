@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.4] - 2026-04-10
+
+### Documentation
+
+- update CHANGELOG.md for v0.2.3
+
+### Fixed
+
+- expand ~ in data_dir config path + show server status in `rtfm status`
+- replace full source= line for -bin wheel URL
+- retry PyPI wheel URL lookup, disable fail-fast for AUR matrix
 ## [0.2.3] - 2026-04-09
 
 ### Added
