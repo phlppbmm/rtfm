@@ -2,14 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.5] - 2026-04-13
+
+### Fixed
+
+- prevent ChromaDB data bloat on framework updates
+
+### Miscellaneous
+
+- bump version to 0.2.5
 ## [0.2.4] - 2026-04-10
 
 ### Documentation
 
+- update CHANGELOG.md for v0.2.4
 - update CHANGELOG.md for v0.2.3
 
 ### Fixed
 
+- treat PyPI "already exists" as success for re-runs
+- add safe.directory for AUR container after chown to builder
 - expand ~ in data_dir config path + show server status in `rtfm status`
 - replace full source= line for -bin wheel URL
 - retry PyPI wheel URL lookup, disable fail-fast for AUR matrix
