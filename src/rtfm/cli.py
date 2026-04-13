@@ -439,20 +439,35 @@ def nuke(config_path: str | None) -> None:
     config = _load_config(config_path)
     data_dir = Path(config.data_dir)
 
-    if not data_dir.exists():
-        console.print("[yellow]Nothing to nuke — data directory doesn't exist.[/yellow]")
+    # Only target known data artifacts — never blow away the whole directory
+    # which may also contain config.yaml or other user files.
+    targets = [data_dir / "rtfm.db", data_dir / "chroma"]
+    existing = [t for t in targets if t.exists()]
+
+    if not existing:
+        console.print("[yellow]Nothing to nuke — no data files found.[/yellow]")
         return
 
-    size_mb = sum(f.stat().st_size for f in data_dir.rglob("*") if f.is_file()) / 1024 / 1024
+    size_mb = sum(
+        f.stat().st_size
+        for t in existing
+        for f in (t.rglob("*") if t.is_dir() else [t])
+        if f.is_file()
+    ) / 1024 / 1024
     console.print(f"[bold red]This will delete ALL indexed data ({size_mb:.1f} MB):[/bold red]")
-    console.print(f"  {data_dir}")
+    for t in existing:
+        console.print(f"  {t}")
     confirm = click.prompt("Type 'nuke' to confirm", default="", show_default=False)
     if confirm != "nuke":
         console.print("[yellow]Aborted.[/yellow]")
         return
 
-    shutil.rmtree(data_dir)
-    console.print(f"[green]Nuked {data_dir} ({size_mb:.1f} MB freed).[/green]")
+    for t in existing:
+        if t.is_dir():
+            shutil.rmtree(t)
+        else:
+            t.unlink()
+    console.print(f"[green]Nuked {len(existing)} data targets ({size_mb:.1f} MB freed).[/green]")
     console.print("[dim]Run 'rtfm ingest' to rebuild.[/dim]")
 
 
