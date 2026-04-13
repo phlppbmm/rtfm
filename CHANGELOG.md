@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Documentation
+
+- update CHANGELOG.md for v0.2.5
+
+### Fixed
+
+- nuke only deletes data artifacts, not the entire data directory
+
+### Miscellaneous
+
+- bump version to 0.2.6
 ## [0.2.5] - 2026-04-13
 
 ### Fixed
