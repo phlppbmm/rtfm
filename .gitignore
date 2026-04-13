@@ -12,3 +12,4 @@ build/
 uv.lock
 .claude/
 issues/
+.claude-data

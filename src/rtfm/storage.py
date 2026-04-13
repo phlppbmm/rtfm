@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import contextlib
+import gc
 import json
 import logging
 import os
+import shutil
 import sqlite3
 import sys
 from collections.abc import Iterator
@@ -529,13 +531,12 @@ class Storage:
 
     def clear_framework(self, framework: str) -> None:
         """Remove all data for a framework."""
-        ids = self._units.ids_for_framework(framework)
         self._symbols.delete_framework(framework)
         self._units.delete_framework(framework)
         self._versions.delete(framework)
         self._conn.commit()
         self._conn.execute("VACUUM")
-        self._chroma_delete(ids)
+        self._chroma_rebuild_without(framework)
 
     def clear_all(self) -> None:
         """Remove all data."""
@@ -544,12 +545,7 @@ class Storage:
         self._versions.delete_all()
         self._conn.commit()
         self._conn.execute("VACUUM")
-
-        self._chroma_client.delete_collection("knowledge_units")
-        self._collection = self._chroma_client.get_or_create_collection(
-            name="knowledge_units",
-            metadata={"hnsw:space": "cosine"},
-        )
+        self._chroma_nuke_and_recreate()
 
     # -- Search ----------------------------------------------------------
 
@@ -707,3 +703,55 @@ class Storage:
         batch_size = 100
         for i in range(0, len(ids), batch_size):
             self._collection.delete(ids=ids[i : i + batch_size])
+
+    def _chroma_nuke_and_recreate(self) -> None:
+        """Physically delete the ChromaDB directory and recreate an empty collection.
+
+        ChromaDB soft-deletes vectors — disk space is never reclaimed by
+        ``collection.delete()`` or ``delete_collection()``.  The only
+        reliable way to recover space is to remove the files on disk.
+        """
+        del self._collection
+        self._chroma_client.close()
+        del self._chroma_client
+        gc.collect()
+
+        chroma_dir = self._data_dir / "chroma"
+        shutil.rmtree(chroma_dir, ignore_errors=True)
+
+        with _route_native_stderr():
+            self._chroma_client = chromadb.PersistentClient(
+                path=str(chroma_dir),
+            )
+            self._collection = self._chroma_client.get_or_create_collection(
+                name="knowledge_units",
+                metadata={"hnsw:space": "cosine"},
+            )
+
+    def _chroma_rebuild_without(self, framework: str) -> None:
+        """Remove one framework's embeddings by rebuilding ChromaDB without them.
+
+        Extracts all surviving vectors (with pre-computed embeddings), nukes
+        the ChromaDB directory, and re-inserts the survivors.  This avoids
+        re-computing embeddings while fully reclaiming disk space.
+        """
+        # Extract everything that should survive.
+        surviving = self._collection.get(
+            where={"framework": {"$ne": framework}},
+            include=["documents", "metadatas", "embeddings"],
+        )
+
+        self._chroma_nuke_and_recreate()
+
+        if not surviving["ids"]:
+            return
+
+        batch_size = 100
+        with _route_native_stderr():
+            for i in range(0, len(surviving["ids"]), batch_size):
+                self._collection.add(
+                    ids=surviving["ids"][i : i + batch_size],
+                    documents=surviving["documents"][i : i + batch_size],
+                    metadatas=surviving["metadatas"][i : i + batch_size],
+                    embeddings=surviving["embeddings"][i : i + batch_size],
+                )
