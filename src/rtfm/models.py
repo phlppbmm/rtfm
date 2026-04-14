@@ -139,7 +139,7 @@ class SourceConfig:
     def from_dict(cls, name: str, d: dict[str, Any]) -> Self:
         return cls(
             name=name,
-            type=d["type"],
+            type=d.get("type", "auto"),
             language=d.get("language", ""),
             repo=d.get("repo", ""),
             docs_path=d.get("docs_path", ""),
