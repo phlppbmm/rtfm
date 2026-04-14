@@ -82,8 +82,11 @@ class _SmartGroup(click.Group):
 
 
 @click.group(cls=_SmartGroup, invoke_without_command=True)
+@click.version_option(package_name="agent-rtfm")
+@click.option("--frameworks", "list_frameworks", is_flag=True, help="List indexed frameworks (comma-separated) and exit")
+@click.option("--config", "config_path", default=None, hidden=True)
 @click.pass_context
-def cli(ctx: click.Context) -> None:
+def cli(ctx: click.Context, list_frameworks: bool, config_path: str | None) -> None:
     """rtfm — documentation retrieval for agents and humans.
 
     \b
@@ -103,12 +106,22 @@ def cli(ctx: click.Context) -> None:
     Admin:
       rtfm ingest [-f name] [--rebuild]   Download & index docs
       rtfm status [--no-check]            Health scores & unit counts
+      rtfm --frameworks                   List indexed frameworks (sparse)
       rtfm up / down                      Start/stop background server
       rtfm update                         Re-ingest outdated sources
       rtfm init                           Create ~/.rtfm/config.yaml
       rtfm remove <name>                  Delete a framework's data
       rtfm serve                          Foreground server (systemd)
     """
+    if list_frameworks:
+        from rtfm.storage import Storage
+
+        config = _load_config(config_path)
+        storage = Storage(config.data_dir, config.embedding_model)
+        names = sorted(storage.get_stats().keys())
+        storage.close()
+        click.echo(", ".join(names))
+        return
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
 
@@ -168,7 +181,8 @@ def _try_lookup(
     if resp.status_code == 404:
         return None  # not a known symbol, fall through to bundle
 
-    resp.raise_for_status()
+    if resp.status_code >= 400:
+        return None  # server error — fall through to bundle
     data = resp.json()
 
     if as_json:
