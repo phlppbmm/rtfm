@@ -438,7 +438,7 @@ async def _ingest_one_async(
 
     # Health check
     min_score = config.min_health_score
-    if min_score > 0:
+    if min_score > 0 and not src.health_exclude:
         from rtfm.health import compute_health
         h = compute_health(storage.conn, name)
         if h.score < min_score:

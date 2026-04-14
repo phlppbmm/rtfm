@@ -385,7 +385,8 @@ def status(config_path: str | None, no_check: bool, as_json: bool) -> None:
         console.print(f"[yellow]Run 'rtfm update' to re-ingest {outdated_count} outdated source(s).[/yellow]")
 
     min_score = config.min_health_score
-    below = [fw for fw, h in health.items() if h.score < min_score]
+    excluded = {name for name, src in config.sources.items() if src.health_exclude}
+    below = [fw for fw, h in health.items() if h.score < min_score and fw not in excluded]
     if below:
         console.print(
             f"[red]{len(below)} source(s) below health threshold ({min_score}): "

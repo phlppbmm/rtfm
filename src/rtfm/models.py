@@ -134,6 +134,7 @@ class SourceConfig:
     url_filter: str = ""
     urls: list[str] | None = None
     doc_system: str = ""  # detected or explicit: sphinx, mkdocs, rustdoc, typedoc, llms_txt, generic_md
+    health_exclude: bool = False  # bypass min_health_score gate for this source
 
     @classmethod
     def from_dict(cls, name: str, d: dict[str, Any]) -> Self:
@@ -150,6 +151,7 @@ class SourceConfig:
             url_filter=d.get("url_filter", ""),
             urls=d.get("urls"),
             doc_system=d.get("doc_system", ""),
+            health_exclude=bool(d.get("health_exclude", False)),
         )
 
 
